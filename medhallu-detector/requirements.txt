@@ -1,0 +1,16 @@
+# What this is: shared dependencies for the entire project
+# Why: one file so all 3 persons install the same versions
+
+datasets            # loads MedHallu and MedQA from HuggingFace
+pandas              # data manipulation (filtering, grouping, saving CSVs)
+matplotlib          # charts for EDA
+seaborn             # prettier charts on top of matplotlib
+scikit-learn        # F1 score, classification report
+groq                # Groq free API client for Llama baseline
+transformers        # DeBERTa model, tokenizer, QA head
+torch               # PyTorch — model training
+accelerate          # multi-GPU / mixed precision training
+gradio              # web UI for the final demo app
+sentencepiece       # required by DeBERTa tokenizer
+protobuf            # required by sentencepiece
+label-studio

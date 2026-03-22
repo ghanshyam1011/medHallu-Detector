@@ -1,0 +1,16 @@
+myenv/
+venv/
+__pycache__/
+*.pyc
+*.pt
+*.bin
+*.safetensors
+*.ckpt
+.ipynb_checkpoints/
+.DS_Store
+Thumbs.db
+.vscode/
+.cache/
+person3_spans/outputs/
+person1_data/outputs/*.csv
+person2_model/outputs/resume_checkpoint.pt
