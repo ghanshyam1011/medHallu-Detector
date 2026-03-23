@@ -124,12 +124,13 @@ Manual annotation of 300 spans takes 3–4 hours. Using Groq's free Llama API to
 
 ## 📊 Results
 
-| Split | GPT-4o (paper) | Groq Llama (zero-shot) | Our DeBERTa |
-|-------|---------------|------------------------|-------------|
-| Overall | 0.737 | — | — |
-| Easy | 0.844 | — | — |
-| Medium | 0.758 | — | — |
-| Hard | 0.625 | — | — |
+| Split   | GPT-4o (paper) | Groq Llama (zero-shot) | Our DeBERTa |
+| ------- | -------------- | ---------------------- | ----------- |
+| Overall | 0.737          | 0.0463                 | 0.1667      |
+| Easy    | 0.844          | 0.0705                 | 0.1667      |
+| Medium  | 0.758          | 0.0358                 | 0.1667      |
+| Hard    | 0.625          | 0.0318                 | 0.1667      |
+
 
 *Fill in your actual numbers from `evaluate.py` after training finishes.*
 
