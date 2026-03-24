@@ -20,7 +20,7 @@ import json
 
 # --- Configuration -------------------------------------------
 
-API_KEY    = os.environ.get("GROQ_API_KEY", "")
+API_KEY    = os.environ.get("GROQ_API_KEY", "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")
 MODEL_NAME = "llama-3.1-8b-instant"
 NUM_ROWS   = 1000
 SLEEP_SEC  = 0.25
@@ -31,10 +31,7 @@ OUTPUT_CSV = "outputs/groq_results.csv"
 # wrong by construction. The model should predict "hallucinated"
 # for all of them. We still allow other labels so we can measure
 # how often Groq incorrectly says "grounded".
-VALID_LABELS = {"hallucinated", "grounded", "partially_hallucinated", "not_sure"}
-
-
-# --- Prompt --------------------------------------------------
+VALID_LABELS = {"hallucinated", "grounded"}
 
 PROMPT_TEMPLATE = """You are a medical fact-checking assistant.
 
@@ -46,9 +43,7 @@ Answer given by AI: {answer}
 
 Source (ground truth): {source}
 
-Is the answer hallucinated, grounded, or partially hallucinated?
-Reply with exactly one of these four words only, nothing else:
-hallucinated / grounded / partially_hallucinated / not_sure"""
+Reply with exactly one word only — hallucinated or grounded — nothing else."""
 
 
 # --- Helper functions ----------------------------------------
