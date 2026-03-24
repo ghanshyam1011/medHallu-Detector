@@ -32,8 +32,7 @@ from collections import Counter
 LABEL_MAP = {
     "grounded":               0,
     "hallucinated":           1,
-    "partially_hallucinated": 2,
-    "not_sure":               3,
+   
 }
 LABEL_MAP_INV = {v: k for k, v in LABEL_MAP.items()}
 
