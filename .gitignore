@@ -1,0 +1,14 @@
+```text
+# Python
+venv/
+__pycache__/
+
+# API Keys
+.env
+
+# Model Weights & Outputs (DO NOT PUSH)
+*.pt
+*.safetensors
+*.bin
+person3_spans/outputs/
+deberta-span-extractor/
