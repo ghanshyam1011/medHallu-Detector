@@ -125,25 +125,49 @@ span_tokenizer = None
 span_model_hf  = None
 
 if os.path.exists(SPAN_MODEL_DIR):
+    local_model_loaded = False
+    local_tokenizer_loaded = False
+
+    # Load local fine-tuned weights first.
     try:
-        span_tokenizer = AutoTokenizer.from_pretrained(
-            SPAN_MODEL_DIR,
-            local_files_only=True,
-        )
         span_model_hf = AutoModelForQuestionAnswering.from_pretrained(
             SPAN_MODEL_DIR,
             local_files_only=True,
             ignore_mismatched_sizes=True,
         )
+        local_model_loaded = True
+        print("  Local fine-tuned span weights loaded")
+    except Exception as e:
+        print(f"  WARNING: Could not load local span weights: {e}")
+
+    # Try tokenizer from local artifacts; fall back to a compatible tokenizer if needed.
+    try:
+        span_tokenizer = AutoTokenizer.from_pretrained(
+            SPAN_MODEL_DIR,
+            local_files_only=True,
+        )
+        local_tokenizer_loaded = True
+        print("  Local span tokenizer loaded")
+    except Exception as e:
+        print(f"  WARNING: Could not load local span tokenizer: {e}")
+        try:
+            span_tokenizer = AutoTokenizer.from_pretrained("roberta-base")
+            print("  Using roberta-base tokenizer fallback with local weights")
+        except Exception as e2:
+            print(f"  WARNING: Could not load tokenizer fallback: {e2}")
+
+    if local_model_loaded and span_tokenizer is not None:
         span_model_hf = span_model_hf.to(device)
         span_model_hf.eval()
-        print("  Span extractor ready")
-    except Exception as e:
-        print(f"  WARNING: Could not load span model: {e}")
-        # Fallback — try loading from HuggingFace base model directly
+        if local_tokenizer_loaded:
+            print("  Span extractor ready (local fine-tuned model + local tokenizer)")
+        else:
+            print("  Span extractor ready (local fine-tuned model + roberta-base tokenizer)")
+    else:
+        # Full fallback — load a compatible public QA checkpoint.
         try:
             print("  Trying fallback: loading base span model from HuggingFace...")
-            BASE_SPAN = "deepset/deberta-v3-base-squad2"
+            BASE_SPAN = "deepset/roberta-base-squad2"
             span_tokenizer = AutoTokenizer.from_pretrained(BASE_SPAN)
             span_model_hf  = AutoModelForQuestionAnswering.from_pretrained(BASE_SPAN)
             span_model_hf  = span_model_hf.to(device)
@@ -151,6 +175,8 @@ if os.path.exists(SPAN_MODEL_DIR):
             print("  Span extractor ready (base model — no fine-tuning)")
         except Exception as e2:
             print(f"  WARNING: Fallback also failed: {e2}")
+            span_tokenizer = None
+            span_model_hf = None
             print("  Span highlighting disabled")
 print("\n[3/3] Loading comparison data...")
 results_data = None
