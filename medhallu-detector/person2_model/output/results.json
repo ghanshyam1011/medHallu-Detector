@@ -1,0 +1,38 @@
+{
+  "medhallu_validation": {
+    "split": "MedHallu Validation",
+    "overall_f1": 0.9575,
+    "easy_f1": 0.9463,
+    "medium_f1": 0.9578,
+    "hard_f1": 0.9665,
+    "type_f1": 0.2828
+  },
+  "medhallu_test": {
+    "split": "MedHallu Test (Easy/Med/Hard)",
+    "overall_f1": 0.954,
+    "easy_f1": 0.9504,
+    "medium_f1": 0.9629,
+    "hard_f1": 0.949,
+    "type_f1": 0.2679
+  },
+  "groq_baseline": {
+    "model": "Groq Llama-3.1-8B (zero-shot)",
+    "overall_f1": 0.2936,
+    "easy_f1": 0.3107,
+    "medium_f1": 0.2904,
+    "hard_f1": 0.2796,
+    "rows_evaluated": 1000,
+    "note": "All true labels are hallucinated (pqa_artificial)"
+  },
+  "gpt4o_paper": {
+    "overall": 0.737,
+    "easy": 0.844,
+    "medium": 0.758,
+    "hard": 0.625
+  },
+  "checkpoint_info": {
+    "epoch": 4,
+    "label_f1": 0.956982793117247,
+    "type_f1": 0.28348409022492793
+  }
+}
