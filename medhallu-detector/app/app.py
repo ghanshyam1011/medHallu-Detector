@@ -1,7 +1,3 @@
-# ============================================================
-# app.py — REDESIGNED
-# ============================================================
-
 import os
 import json
 import numpy as np
@@ -128,7 +124,6 @@ if os.path.exists(SPAN_MODEL_DIR):
     local_model_loaded = False
     local_tokenizer_loaded = False
 
-    # Load local fine-tuned weights first.
     try:
         span_model_hf = AutoModelForQuestionAnswering.from_pretrained(
             SPAN_MODEL_DIR,
@@ -140,7 +135,6 @@ if os.path.exists(SPAN_MODEL_DIR):
     except Exception as e:
         print(f"  WARNING: Could not load local span weights: {e}")
 
-    # Try tokenizer from local artifacts; fall back to a compatible tokenizer if needed.
     try:
         span_tokenizer = AutoTokenizer.from_pretrained(
             SPAN_MODEL_DIR,
@@ -164,7 +158,6 @@ if os.path.exists(SPAN_MODEL_DIR):
         else:
             print("  Span extractor ready (local fine-tuned model + roberta-base tokenizer)")
     else:
-        # Full fallback — load a compatible public QA checkpoint.
         try:
             print("  Trying fallback: loading base span model from HuggingFace...")
             BASE_SPAN = "deepset/roberta-base-squad2"
@@ -178,6 +171,7 @@ if os.path.exists(SPAN_MODEL_DIR):
             span_tokenizer = None
             span_model_hf = None
             print("  Span highlighting disabled")
+
 print("\n[3/3] Loading comparison data...")
 results_data = None
 if os.path.exists(RESULTS_JSON):
@@ -214,9 +208,6 @@ print("\nAll models loaded. Starting Gradio app...")
 
 
 def get_4class_verdict(halluc_prob: float) -> str:
-    """
-    Converts binary hallucination probability into 4 user-facing tiers.
-    """
     if halluc_prob >= 0.75:
         return "hallucinated"
     if halluc_prob >= 0.55:
@@ -231,25 +222,18 @@ def _normalize_text(s: str) -> str:
 
 
 def is_directly_supported(answer: str, source: str) -> bool:
-    """
-    Strong lexical support check used as a guardrail for obvious grounded cases.
-    """
     ans = _normalize_text(answer)
     src = _normalize_text(source)
     if not ans or not src:
         return False
-    # Avoid tiny fragments causing accidental matches.
     if len(ans) < 40:
         return ans == src
-
     if ans in src:
         return True
-
     ans_tokens = [token for token in ans.split() if token]
     src_tokens = set(src.split())
     if not ans_tokens:
         return False
-
     token_overlap = sum(1 for token in ans_tokens if token in src_tokens) / len(ans_tokens)
     sequence_ratio = SequenceMatcher(None, ans, src).ratio()
     return token_overlap >= 0.85 or sequence_ratio >= 0.9
@@ -260,9 +244,9 @@ def is_directly_supported(answer: str, source: str) -> bool:
 # ============================================================
 def run_classifier(question, answer, source):
     question = str(question).strip()
-    answer = str(answer).strip()
-    source = str(source).strip()
-    
+    answer   = str(answer).strip()
+    source   = str(source).strip()
+
     encoding = clf_tokenizer(
         source, f"{question} {answer}",
         max_length=256, truncation=True,
@@ -277,7 +261,7 @@ def run_classifier(question, answer, source):
     except RuntimeError as e:
         if not _fallback_to_cpu_if_needed(e):
             raise
-        input_ids = encoding["input_ids"].to(device)
+        input_ids      = encoding["input_ids"].to(device)
         attention_mask = encoding["attention_mask"].to(device)
         with torch.no_grad():
             label_logits, type_logits = clf_model(input_ids, attention_mask)
@@ -285,11 +269,11 @@ def run_classifier(question, answer, source):
     label_probs = torch.softmax(label_logits, dim=-1)[0]
     type_probs  = torch.softmax(type_logits,  dim=-1)[0]
 
-    label_id   = label_probs.argmax().item()
-    type_id    = type_probs.argmax().item()
-    verdict    = LABEL_MAP_INV[label_id]
-    confidence = label_probs[label_id].item()
-    htype      = TYPE_MAP_INV[type_id]
+    label_id    = label_probs.argmax().item()
+    type_id     = type_probs.argmax().item()
+    verdict     = LABEL_MAP_INV[label_id]
+    confidence  = label_probs[label_id].item()
+    htype       = TYPE_MAP_INV[type_id]
     halluc_prob = label_probs[LABEL_MAP["hallucinated"]].item()
     verdict_4class = get_4class_verdict(halluc_prob)
 
@@ -300,16 +284,24 @@ def run_classifier(question, answer, source):
     return verdict, confidence, htype, all_probs, halluc_prob, verdict_4class
 
 
-def run_span_extractor(answer):
+# ============================================================
+# UPDATED: span extractor now receives source too
+# ============================================================
+def run_span_extractor(answer, source):
     if span_model_hf is None or span_tokenizer is None:
         return "", 0.0
 
-    SPAN_QUESTION = "Which phrase is not supported by the source?"
+    SPAN_QUESTION = "Which phrase in the answer is not supported by the source?"
+    combined_context = f"Source: {source} Answer: {answer}"
+
     try:
         encoding = span_tokenizer(
-            SPAN_QUESTION, answer,
-            max_length=384, truncation="only_second",
-            padding="max_length", return_offsets_mapping=True,
+            SPAN_QUESTION,
+            combined_context,
+            max_length=512,
+            truncation="only_second",
+            padding="max_length",
+            return_offsets_mapping=True,
             return_tensors="pt",
         )
         offsets      = encoding["offset_mapping"][0].tolist()
@@ -323,14 +315,35 @@ def run_span_extractor(answer):
         except RuntimeError as e:
             if not _fallback_to_cpu_if_needed(e):
                 raise
-            input_ids = encoding["input_ids"].to(device)
+            input_ids      = encoding["input_ids"].to(device)
             attention_mask = encoding["attention_mask"].to(device)
             with torch.no_grad():
                 outputs = span_model_hf(input_ids=input_ids, attention_mask=attention_mask)
 
         start_logits = outputs.start_logits[0].cpu().numpy()
         end_logits   = outputs.end_logits[0].cpu().numpy()
-        ctx_indices  = [i for i, s in enumerate(sequence_ids) if s == 1]
+
+        # --------------------------------------------------------
+        # Find where "Answer: " starts in the combined_context
+        # so we only allow the model to predict spans from the
+        # answer portion, not from the source portion.
+        # --------------------------------------------------------
+        answer_prefix    = f"Source: {source} Answer: "
+        answer_offset    = len(answer_prefix)
+
+        # Filter ctx_indices to only tokens that fall inside the answer portion
+        ctx_indices = []
+        for i, (seq_id, (char_s, char_e)) in enumerate(zip(sequence_ids, offsets)):
+            if seq_id == 1 and char_s >= answer_offset:
+                ctx_indices.append(i)
+
+        # Fallback: if nothing maps to the answer portion (e.g. source was
+        # so long it got truncated and ate into the answer), use ALL context
+        # tokens so we at least return something.
+        if not ctx_indices:
+            ctx_indices = [i for i, s in enumerate(sequence_ids) if s == 1]
+            answer_offset = 0  # can't adjust, return raw span
+
         if not ctx_indices:
             return "", 0.0
 
@@ -355,13 +368,24 @@ def run_span_extractor(answer):
         if char_start >= char_end:
             return "", 0.0
 
-        span_text  = answer[char_start:char_end].strip()
+        # Adjust back to answer-only coordinates
+        adj_start = char_start - answer_offset
+        adj_end   = char_end   - answer_offset
+
+        if adj_start < 0 or adj_end <= adj_start or adj_end > len(answer):
+            return "", 0.0
+
+        span_text  = answer[adj_start:adj_end].strip()
         confidence = float(torch.softmax(outputs.start_logits[0], dim=-1)[best_start].item())
+
+        if not span_text:
+            return "", 0.0
+
         return span_text, confidence
+
     except Exception as e:
         print(f"Span extractor error: {e}")
         return "", 0.0
-
 
 def highlight_span(answer, span):
     base_style = "font-size:15px;line-height:2;padding:16px;border-radius:10px;border:1px solid #1e293b;background:#0f172a;color:#e2e8f0;font-family:'IBM Plex Mono',monospace;"
@@ -394,19 +418,18 @@ def predict(question, answer, source):
 
     _, confidence, htype, all_probs, halluc_prob, verdict = run_classifier(question, answer, source)
 
-    # Guardrail: if answer is directly present in source, force grounded tier.
     if is_directly_supported(answer, source):
-        verdict = "grounded"
+        verdict     = "grounded"
         halluc_prob = min(halluc_prob, 0.05)
-        confidence = max(confidence, 1.0 - halluc_prob)
-        htype = "none"
-        # Update probability display to match guardrail override
+        confidence  = max(confidence, 1.0 - halluc_prob)
+        htype       = "none"
         all_probs["hallucinated"] = round(halluc_prob, 4)
-        all_probs["grounded"] = round(1.0 - halluc_prob, 4)
+        all_probs["grounded"]     = round(1.0 - halluc_prob, 4)
 
     span_text = ""
     if verdict in {"hallucinated", "partially_hallucinated"}:
-        span_text, _ = run_span_extractor(answer)
+        # UPDATED: pass source so the extractor can cross-reference
+        span_text, _ = run_span_extractor(answer, source)
 
     if verdict in {"grounded", "likely_grounded"}:
         htype = "none"
@@ -448,7 +471,6 @@ def predict(question, answer, source):
     answer_html  = highlight_span(answer, span_text)
     span_display = span_text if span_text else "— no specific phrase identified"
 
-    # Probability bars
     bars_html = "<div style='font-family:\"IBM Plex Mono\",monospace;font-size:13px'>"
     bars_html += "<div style='font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#475569;margin-bottom:12px'>Class Probabilities</div>"
     for label, prob in sorted(all_probs.items(), key=lambda x: -x[1]):
@@ -475,15 +497,13 @@ def predict(question, answer, source):
 
 
 # ============================================================
-# Comparison table — uses medhallu_test from results.json
+# Comparison table
 # ============================================================
 def build_comparison_table():
     if results_data is None:
         return "<p style='color:#64748b;font-family:IBM Plex Mono,monospace'>results.json not found. Run evaluate.py first.</p>"
 
     checkpoint = results_data.get("checkpoint_info", {})
-    # Use medhallu_test for the main table (has Easy/Med/Hard splits)
-    # Fall back to medhallu_validation if test key not present
     our  = results_data.get("medhallu_test", results_data.get("medhallu_validation", {}))
     groq = results_data.get("groq_baseline", {})
 
@@ -531,7 +551,6 @@ def build_comparison_table():
 
     html = f"""
     <div style='font-family:"IBM Plex Mono",monospace'>
-
         <div style='margin-bottom:24px'>
             <div style='font-size:10px;letter-spacing:3px;color:#475569;text-transform:uppercase;margin-bottom:16px'>
                 Performance vs Baselines — MedHallu Test Split
@@ -553,7 +572,6 @@ def build_comparison_table():
                 ✓ Green = beats GPT-4o &nbsp;|&nbsp; Evaluated on MedHallu rows 8000–10000 (unseen during training)
             </div>
         </div>
-
         <div style='display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:24px'>
             <div style='background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px'>
                 <div style='font-size:10px;letter-spacing:2px;color:#475569;text-transform:uppercase;margin-bottom:8px'>Best Epoch</div>
@@ -568,7 +586,6 @@ def build_comparison_table():
                 <div style='font-size:28px;font-weight:700;color:#94a3b8'>{type_f1}</div>
             </div>
         </div>
-
         <div style='background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px;font-size:12px;color:#475569;line-height:1.8'>
             <span style='color:#10b981'>●</span> Trained on MedHallu pqa_artificial rows 0–7000 &nbsp;
             <span style='color:#475569'>●</span> Validated on rows 7000–8000 &nbsp;
@@ -598,7 +615,6 @@ body, .gradio-container {
     font-family: 'IBM Plex Mono', monospace !important;
 }
 
-/* Tabs */
 .tab-nav {
     background: #0f172a !important;
     border-bottom: 1px solid #1e293b !important;
@@ -626,7 +642,6 @@ body, .gradio-container {
     color: #e2e8f0 !important;
 }
 
-/* Inputs */
 textarea, input[type="text"] {
     background: #0f172a !important;
     border: 1px solid #1e293b !important;
@@ -650,7 +665,6 @@ label span {
     text-transform: uppercase !important;
 }
 
-/* Button */
 button.primary {
     background: #10b981 !important;
     color: #020817 !important;
@@ -670,20 +684,17 @@ button.primary:hover {
     box-shadow: 0 4px 20px #10b98133 !important;
 }
 
-/* Panels & blocks */
 .block, .form {
     background: #0f172a !important;
     border: 1px solid #1e293b !important;
     border-radius: 10px !important;
 }
 
-/* Textbox output */
 .output-textbox textarea {
     color: #94a3b8 !important;
     font-size: 13px !important;
 }
 
-/* Examples */
 .examples-holder {
     background: transparent !important;
 }
@@ -704,7 +715,6 @@ button.primary:hover {
     cursor: pointer !important;
 }
 
-/* Markdown */
 .prose, .md {
     color: #94a3b8 !important;
     font-family: 'IBM Plex Mono', monospace !important;
@@ -714,7 +724,6 @@ button.primary:hover {
     color: #e2e8f0 !important;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: #020817; }
 ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 2px; }
@@ -757,7 +766,6 @@ EXAMPLES = [
 # ============================================================
 with gr.Blocks(title="MedHallu Detector") as app:
 
-    # Header
     gr.HTML("""
     <div style='padding:40px 0 32px;font-family:"Syne",sans-serif'>
         <div style='font-size:10px;letter-spacing:4px;text-transform:uppercase;
@@ -779,7 +787,6 @@ with gr.Blocks(title="MedHallu Detector") as app:
     with gr.Tab("◈  Detector"):
         with gr.Row(equal_height=False):
 
-            # Left — inputs
             with gr.Column(scale=1):
                 gr.HTML("<div style='font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#475569;margin-bottom:16px;font-family:IBM Plex Mono,monospace'>Input</div>")
 
@@ -803,7 +810,6 @@ with gr.Blocks(title="MedHallu Detector") as app:
                 gr.HTML("<div style='font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#334155;margin:20px 0 10px;font-family:IBM Plex Mono,monospace'>Examples</div>")
                 gr.Examples(examples=EXAMPLES, inputs=[q_input, a_input, s_input], label="")
 
-            # Right — outputs
             with gr.Column(scale=1):
                 gr.HTML("<div style='font-size:10px;letter-spacing:3px;text-transform:uppercase;color:#475569;margin-bottom:16px;font-family:IBM Plex Mono,monospace'>Analysis</div>")
 
